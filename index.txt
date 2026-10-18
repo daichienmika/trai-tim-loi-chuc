@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trái tim lời chúc</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#020204;color:#fff;font-family:Arial,Helvetica,sans-serif}
+  body{position:relative;background:radial-gradient(ellipse at 50% 48%,#10070b 0%,#030305 48%,#000 100%)}
+  canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+  #scene{z-index:1}
+  #words{z-index:2;pointer-events:none}
+  .hint{position:fixed;z-index:3;bottom:12px;left:50%;transform:translateX(-50%);font-size:11px;color:#aaa;letter-spacing:1px;opacity:.75;white-space:nowrap}
+  .sound{position:fixed;z-index:4;top:14px;right:14px;border:1px solid #555;background:#1118;color:#eee;border-radius:20px;padding:8px 11px;font-size:12px}
+  #intro{position:fixed;inset:0;z-index:5;background:#000;display:flex;align-items:center;justify-content:center;pointer-events:none;animation:introFade 5.4s ease forwards}
+  #intro span{font-size:clamp(12px,2.8vw,18px);letter-spacing:.42em;color:#ffdce5;opacity:0;animation:introText 3.2s ease forwards;text-shadow:0 0 16px #ff4f78}
+  @keyframes introText{0%{opacity:0;transform:translateY(12px);letter-spacing:.8em}35%{opacity:.9}75%{opacity:.65}100%{opacity:0;transform:translateY(-8px);letter-spacing:.42em}}
+  @keyframes introFade{0%,55%{opacity:1}100%{opacity:0;visibility:hidden}}
+  @media(prefers-reduced-motion:reduce){#intro,#intro span{animation-duration:1s}}
+  
+  #heartPhoto {
+  position: fixed;
+  z-index: 2;
+  left: 50%;
+  top: 30%;
+  transform: translate(-50%, -50%);
+  width: clamp(90px, 24vw, 190px);
+  height: clamp(90px, 24vw, 190px);
+  object-fit: cover;
+  border-radius: 50%;
+  opacity: 0.24;
+  filter: blur(0.6px) saturate(0.8);
+  mix-blend-mode: screen;
+  -webkit-mask-image: radial-gradient(
+    circle, #000 35%, transparent 72%
+  );
+  mask-image: radial-gradient(
+    circle, #000 35%, transparent 72%
+  );
+  pointer-events: none;
+}
+</style>
+</head>
+<body>
+<canvas id="scene"></canvas>
+<canvas id="words"></canvas>
+<!-- ẢNH MỜ Ở GIỮA TRÁI TIM: THAY LINK ẢNH Ở ĐÂY -->
+<img
+  id="heartPhoto"
+  src="DAN_LINK_ANH_CUA_BAN_VAO_DAY"
+  alt=""
+/>
+<div id="intro"><span>MÓN QUÀ NHO NHỎ</span></div>
+<audio id="bgMusic" loop preload="auto"></audio>
+<button class="sound" id="soundBtn" title="Phát/tạm dừng nhạc">♪ Đang thử mở nhạc…</button>
+
+<script>
+/* ==========================================================
+   CONFIG — BẠN CHỈ CẦN SỬA CÁC DÒNG "ĐOẠN 1, 2, 3..." Ở ĐÂY
+   Không cần sửa phần hiệu ứng bên dưới.
+   ========================================================== */
+const CONFIG = {
+  messages: [
+    "Bé Mai",
+    "Chúc em 20 tháng 10 dui dẻ",
+    "Ngày càng xinh đẹp",
+    "Gặp nhiều may mắn trong cuộc sống",
+    "Tìm được người thương em",
+    "Tập ăn rau giúp mình nhé!!!!",
+    "Biết yêu thương bản thân mình hơn"
+  ],
+  heartColor: [255, 82, 112],
+  heartParticles: 6200,
+  starCount: 180,
+  ringCount: 5,
+
+  // 🎵 DÁN LINK NHẠC TRỰC TIẾP VÀO DÒNG NÀY (MP3/OGG/WAV)
+  // Ví dụ: musicUrl: "https://ten-mien-cua-ban.com/nhac.mp3"
+  // Lưu ý: trình duyệt có thể yêu cầu bấm nút nếu chặn tự phát nhạc.
+  musicUrl: "DAN_LINK_NHAC_CUA_BAN_VAO_DAY.mp3"
+};
+
+const canvas = document.getElementById('scene');
+const ctx = canvas.getContext('2d');
+const wordsCanvas = document.getElementById('words');
+const wctx = wordsCanvas.getContext('2d');
+let W=0,H=0,DPR=1, stars=[], particles=[], heartPoints=[], fallingHearts=[], t=0, audioOn=false;
+const INTRO_SECONDS = 5.4;
+let introProgress = 0;
+
+function resize(){
+  DPR=Math.min(window.devicePixelRatio||1,2);
+  W=innerWidth; H=innerHeight;
+  for(const c of [canvas,wordsCanvas]){
+    c.width=Math.floor(W*DPR); c.height=Math.floor(H*DPR);
+    c.style.width=W+'px'; c.style.height=H+'px';
+  }
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  wctx.setTransform(DPR,0,0,DPR,0,0);
+  stars=Array.from({length:CONFIG.starCount},()=>({x:Math.random()*W,y:Math.random()*H,r:Math.random()*1.7+.25,a:Math.random()*.75+.15,tw:Math.random()*6}));
+  fallingHearts=Array.from({length:280},()=>({x:Math.random()*W,y:Math.random()*H,size:3+Math.random()*9,speed:22+Math.random()*62,drift:(Math.random()-.5)*30,phase:Math.random()*6.28,alpha:.38+Math.random()*.6}));
+  createHeart();
+}
+function heartXY(a, scale=1){
+  return {x:16*Math.pow(Math.sin(a),3)*scale,
+    y:-(13*Math.cos(a)-5*Math.cos(2*a)-2*Math.cos(3*a)-Math.cos(4*a))*scale};
+}
+function createHeart(){
+  heartPoints=[];
+  for(let i=0;i<CONFIG.heartParticles;i++){
+    const a=Math.random()*Math.PI*2;
+    const p=heartXY(a,1);
+    const fill=Math.sqrt(Math.random());
+    heartPoints.push({
+      x:p.x*fill, y:p.y*fill,
+      edge:fill>.84,
+      phase:Math.random()*Math.PI*2,
+      size:Math.random()*1.45+.25,
+      drift:(Math.random()-.5)*.42,
+      // Bắt đầu rải rác ngoài màn hình rồi bay dần về vị trí trái tim.
+      startX:(Math.random()-.5)*W*1.35,
+      startY:(Math.random()-.5)*H*1.25,
+      delay:Math.random()*.62
+    });
+  }
+}
+function heartScreen(p, pulse=1){
+  // Trái tim lớn hơn; vẫn giữ vừa màn hình điện thoại.
+  const scale=Math.min(W/37,H/43)*.84*pulse;
+  return {x:W*.5+p.x*scale,y:H*.30+p.y*scale};
+}
+function drawStars(){
+  for(const s of stars){
+    const tw=.45+.55*Math.sin(t*.7+s.tw);
+    ctx.fillStyle=`rgba(220,210,220,${s.a*tw})`;
+    ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fill();
+  }
+}
+function drawFallingHearts(){
+  // Trái tim nhỏ rơi nhẹ qua nền đen.
+  for(const h of fallingHearts){
+    h.y += h.speed/60;
+    h.x += Math.sin(t*1.2+h.phase)*h.drift/60;
+    if(h.y>H+18){h.y=-18;h.x=Math.random()*W;}
+    ctx.save();
+    ctx.translate(h.x,h.y);
+    ctx.scale(h.size/12,h.size/12);
+    ctx.globalAlpha=h.alpha*(.7+.3*Math.sin(t*3+h.phase));
+    ctx.fillStyle='#ff6b9d';
+    ctx.shadowBlur=0;
+    ctx.beginPath();ctx.moveTo(0,4);ctx.bezierCurveTo(-12,-4,-7,-12,0,-6);ctx.bezierCurveTo(7,-12,12,-4,0,4);ctx.fill();
+    ctx.restore();
+  }
+}
+function drawFloatingSparks(){
+  // Những hạt sáng nhỏ bay lên và lấp lánh quanh cảnh.
+  const amount = Math.min(70, Math.floor(W*H/11000));
+  for(let i=0;i<amount;i++){
+    const phase=t*.55+i*12.9898;
+    const x=((i*97.31+Math.sin(phase)*35)%W+W)%W;
+    const y=(H-((t*18+i*43)% (H+30)));
+    const a=.18+.45*(.5+.5*Math.sin(t*2+i));
+    ctx.fillStyle=`rgba(255,190,210,${a})`;
+    ctx.beginPath();ctx.arc(x,y, .5+(i%3)*.28,0,Math.PI*2);ctx.fill();
+  }
+}
+function drawHeart(){
+  const elapsed = Math.max(0, (performance.now()-startTime)/1000);
+  introProgress = Math.max(0, Math.min(1, (elapsed-0.25)/(INTRO_SECONDS-0.25)));
+  const ease = v => {v=Math.max(0,Math.min(1,v));return v*v*(3-2*v);};
+  // Nhịp đập kép kiểu tim thật: nảy mạnh rồi nảy nhẹ, không xoay tròn.
+  // Nhịp tim nhanh và mạnh hơn, như đang vui mừng khi được tỏ tình.
+  // Nhịp đập kép liên tục: nảy mạnh, nảy nhẹ rồi trở về nhịp nền.
+  const beatPhase=(t*6.2)%(Math.PI*2);
+  const beat1=Math.exp(-Math.pow((beatPhase-.48)/.17,2));
+  const beat2=Math.exp(-Math.pow((beatPhase-.88)/.22,2));
+  const pulse=1+.30*beat1+.17*beat2+.012*Math.sin(t*6.2);
+  const convergence=ease(introProgress);
+
+  // Quầng sáng đỏ hồng phía sau trái tim.
+  const glowX=W*.5, glowY=H*.29;
+  const glow=ctx.createRadialGradient(glowX,glowY,2,glowX,glowY,Math.min(W,H)*.43);
+  glow.addColorStop(0,`rgba(255,35,95,${.095*introProgress})`);
+  glow.addColorStop(.5,`rgba(160,0,35,${.04*introProgress})`);
+  glow.addColorStop(1,'rgba(255,20,60,0)');
+  ctx.fillStyle=glow;ctx.fillRect(0,0,W,H);
+
+  // Quầng sáng nở nhẹ theo từng nhịp đập.
+  const beatGlow=Math.max(beat1,beat2);
+  const haloRadius=Math.min(W,H)*(.20+.075*beatGlow);
+  const halo=ctx.createRadialGradient(glowX,glowY,haloRadius*.72,glowX,glowY,haloRadius);
+  halo.addColorStop(0,'rgba(255,55,105,0)');
+  halo.addColorStop(.78,`rgba(255,70,125,${.035+.12*beatGlow})`);
+  halo.addColorStop(1,'rgba(255,40,100,0)');
+  ctx.fillStyle=halo;
+  ctx.fillRect(glowX-haloRadius,glowY-haloRadius,haloRadius*2,haloRadius*2);
+
+  // Giữ mặt trái tim hướng về phía trước; chỉ phập phồng theo nhịp đập.
+  const rotY=0, rotX=0;
+  const cy=Math.cos(rotY), sy=Math.sin(rotY);
+  const cx=Math.cos(rotX), sx=Math.sin(rotX);
+
+  for(const p of heartPoints){
+    const local=ease((convergence-p.delay*.45)/.72);
+    let x=p.x+Math.sin(t*1.2+p.phase)*p.drift;
+    let y=p.y+Math.cos(t*.9+p.phase)*p.drift;
+    // Tạo độ sâu nhẹ theo chiều trước/sau.
+    let z=Math.sin(p.phase*1.7)*2.8 + Math.sin(t*.65+p.phase)*.7;
+    const xr=x*cy-z*sy;
+    const zr=x*sy+z*cy;
+    const yr=y*cx-zr*sx;
+    const zz=y*sx+zr*cx;
+    const baseX=p.startX*(1-local)+xr*local;
+    const baseY=p.startY*(1-local)+yr*local;
+    const q=heartScreen({x:baseX,y:baseY},pulse);
+    const perspective=1+zz*.008;
+    const shimmer=.3+.7*(.5+.5*Math.sin(t*3+p.phase));
+    const [r,g,b]=CONFIG.heartColor;
+    const alpha=(p.edge?.94:.56)*shimmer*introProgress;
+    ctx.fillStyle=`rgba(${r},${g},${b},${alpha})`;
+    ctx.shadowColor=`rgba(255,55,115,${.8*introProgress})`;
+    ctx.shadowBlur=p.edge?5:0;
+    ctx.beginPath();
+    ctx.arc(q.x,q.y,Math.max(.25,p.size*(p.edge?1.4:1)*perspective),0,Math.PI*2);
+    ctx.fill();
+  }
+  // Hạt phụ lấp lánh thưa hơn, không bật shadow cho từng hạt để giảm giật.
+  ctx.shadowBlur=0;
+  for(let i=0;i<heartPoints.length;i+=7){
+    const p=heartPoints[i];
+    const local=ease((convergence-p.delay*.45)/.72);
+    const q=heartScreen({x:p.startX*(1-local)+p.x*local,y:p.startY*(1-local)+p.y*local},pulse);
+    const sparkle=.25+.75*(.5+.5*Math.sin(t*4+p.phase*2));
+    ctx.fillStyle=`rgba(255,225,240,${sparkle*.65*introProgress})`;
+    ctx.beginPath();ctx.arc(q.x,q.y,Math.max(.35,p.size*.65),0,Math.PI*2);ctx.fill();
+  }
+  ctx.shadowBlur=0;
+}
+function project3D(x,y,z){
+  const perspective=470/(470+z);
+  return {x:W*.5+x*perspective,y:H*.76+y*perspective,scale:perspective};
+}
+function drawRings(){
+  // Bệ neon nhiều tầng giống sân khấu trong ảnh tham khảo.
+  const cx=W*.5, base=Math.min(W/900,1.25);
+  const topY=H*.685;
+  for(let k=0;k<5;k++){
+    const rx=(105+k*48)*base;
+    const ry=(16+k*7)*base;
+    const y=topY+k*H*.052;
+    ctx.save();
+    // Mặt bệ tối, viền neon hồng và các vòng sáng lồng nhau.
+    ctx.fillStyle=`rgba(45,0,18,${.52-k*.045})`;
+    ctx.beginPath();ctx.ellipse(cx,y,rx,ry+H*.018,0,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle=`rgba(255,45,120,${.72-k*.07})`;
+    ctx.lineWidth=1.2;
+    ctx.shadowColor='#ff1e70';ctx.shadowBlur=12;
+    ctx.beginPath();ctx.ellipse(cx,y,rx,ry,0,0,Math.PI*2);ctx.stroke();
+    ctx.strokeStyle='rgba(255,190,220,.62)';ctx.lineWidth=.65;ctx.shadowBlur=5;
+    ctx.beginPath();ctx.ellipse(cx,y+H*.014,rx*.98,ry*.72,0,0,Math.PI*2);ctx.stroke();
+    ctx.restore();
+  }
+  // Các vòng quỹ đạo thấp quanh chân bệ.
+  for(let k=0;k<3;k++){
+    ctx.beginPath();
+    ctx.ellipse(cx,topY+H*.205,W*(.31+k*.035),H*(.035+k*.008),0,0,Math.PI*2);
+    ctx.strokeStyle=`rgba(255,45,125,${.42-k*.1})`;
+    ctx.lineWidth=.8;ctx.shadowColor='#ff2e79';ctx.shadowBlur=8;ctx.stroke();
+  }
+  ctx.shadowBlur=0;
+}
+function drawMessageRings(){
+  wctx.clearRect(0,0,W,H);
+  const base=Math.min(W/1000,1.15);
+  // Mỗi đoạn xuất hiện đúng một lần trên bậc của mình.
+  // Các bậc quay quanh trục đứng, phối cảnh gần/xa tạo cảm giác 3D.
+  const rows=[
+    {y:.695,rx:.105,size:19, msgs:[CONFIG.messages[0]||'ĐOẠN 1',CONFIG.messages[1]||'ĐOẠN 2']},
+    {y:.748,rx:.155,size:22, msgs:[CONFIG.messages[2]||'ĐOẠN 3',CONFIG.messages[3]||'ĐOẠN 4']},
+    {y:.801,rx:.205,size:24, msgs:[CONFIG.messages[4]||'ĐOẠN 5',CONFIG.messages[5]||'ĐOẠN 6']},
+    {y:.854,rx:.255,size:25, msgs:[CONFIG.messages[6]||'ĐOẠN 7',CONFIG.messages[7]||'']}
+  ];
+  const rotSpeed=.48;
+
+  rows.forEach((r,ri)=>{
+    const cy=H*r.y;
+    const rx=Math.min(W*r.rx,W*.34);
+    const ry=Math.max(12,H*(.018+ri*.006));
+    r.msgs.forEach((msg,mi)=>{
+      // Hai thông điệp quay cùng bậc, cách nhau nửa vòng.
+      const angle=t*rotSpeed*(ri%2===0?1:-1)+mi*Math.PI+ri*.38;
+      const depth=Math.sin(angle);
+      const x=W*.5+Math.cos(angle)*rx;
+      const y=cy+depth*ry;
+      const perspective=.58+.42*((depth+1)/2);
+      const size=Math.max(10,r.size*base*perspective);
+      wctx.save();
+      wctx.translate(x,y);
+      // Chữ hơi thu nhỏ và mờ khi ra phía sau, lớn/sáng khi tiến về trước.
+      wctx.globalAlpha=.48+.52*perspective;
+      wctx.font=`bold ${size}px Arial, Helvetica, sans-serif`;
+      wctx.textAlign='center';
+      wctx.textBaseline='middle';
+      wctx.lineWidth=2.5;
+      wctx.strokeStyle='rgba(70,0,25,.95)';
+      wctx.strokeText(msg,0,0);
+      wctx.fillStyle='#fff0f7';
+      wctx.shadowColor='#ff2d78';
+      wctx.shadowBlur=2+7*perspective;
+      wctx.fillText(msg,0,0);
+      wctx.font=`bold ${Math.max(9,size*.72)}px Arial`;
+      wctx.fillStyle='#ff8eb7';
+      wctx.fillText('♥',0,size*.9);
+      wctx.restore();
+    });
+  });
+}
+
+function drawHeartsBelow(){
+  // Các trái tim nhỏ lơ lửng giữa trái tim lớn và vòng chữ
+  const small=[
+    [0,.57,7],[-.13,.65,5],[.13,.67,6],[-.02,.73,7],[.24,.72,5],[-.2,.76,5],[.02,.81,6]
+  ];
+  small.forEach((v,i)=>{
+    const x=W*(.5+v[0]), y=H*(v[1]+Math.sin(t*1.4+i)*.008);
+    ctx.save();ctx.translate(x,y);ctx.rotate(Math.sin(t+i)*.12);ctx.scale(v[2]/6,v[2]/6);
+    ctx.fillStyle='rgba(255,235,240,.9)';
+    ctx.beginPath();ctx.moveTo(0,3);ctx.bezierCurveTo(-12,-5,-7,-12,0,-6);ctx.bezierCurveTo(7,-12,12,-5,0,3);ctx.fill();
+    ctx.restore();
+  });
+}
+function animate(){
+  t+=.016;
+  ctx.clearRect(0,0,W,H);
+  drawStars();drawFallingHearts();drawFloatingSparks();drawHeart();drawHeartsBelow();drawRings();drawMessageRings();
+  requestAnimationFrame(animate);
+}
+const startTime=performance.now();
+resize();animate();window.addEventListener('resize',resize);
+
+// 🎵 NHẠC NỀN: link được đặt trong CONFIG.musicUrl ở đầu file.
+const music = document.getElementById('bgMusic');
+const soundBtn = document.getElementById('soundBtn');
+const musicUrl = (CONFIG.musicUrl || '').trim();
+const hasMusicLink = musicUrl && !musicUrl.includes('DAN_LINK_NHAC_CUA_BAN_VAO_DAY');
+
+if (hasMusicLink) {
+  music.src = musicUrl;
+  music.volume = 0.7;
+
+  // Tự thử phát khi mở trang. Một số trình duyệt chặn autoplay có tiếng;
+  // khi đó người xem chỉ cần bấm nút nhạc một lần.
+  music.play().then(() => {
+    audioOn = true;
+    soundBtn.textContent = '♪ Nhạc: đang phát';
+  }).catch(() => {
+    audioOn = false;
+    soundBtn.textContent = '♪ Bấm để phát nhạc';
+  });
+} else {
+  soundBtn.textContent = '♪ Thêm link nhạc trong CONFIG';
+}
+
+soundBtn.addEventListener('click', async () => {
+  if (!hasMusicLink) {
+    soundBtn.textContent = '♪ Thêm link nhạc trong CONFIG';
+    return;
+  }
+
+  if (music.paused) {
+    try {
+      await music.play();
+      audioOn = true;
+      soundBtn.textContent = '♪ Nhạc: đang phát';
+    } catch (e) {
+      soundBtn.textContent = '♪ Không phát được — kiểm tra link';
+    }
+  } else {
+    music.pause();
+    audioOn = false;
+    soundBtn.textContent = '♪ Nhạc: tạm dừng';
+  }
+});
+</script>
+</body>
+</html>
